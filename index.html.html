@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Workday Expense Extractor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0f1117; color: #e8eaf0; min-height: 100vh; padding: 28px 20px;
+  }
+  h1 { font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 3px; }
+  .subtitle { font-size: 12px; color: #6b7280; margin-bottom: 24px; }
+
+  .upload-zone {
+    border: 2px dashed #2d3148; border-radius: 10px; padding: 28px 20px;
+    text-align: center; cursor: pointer; background: #13151f; position: relative;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: #6366f1; background: #1a1c2e; }
+  .upload-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; }
+  .upload-label { font-size: 13px; color: #9ca3af; }
+  .upload-label strong { color: #6366f1; }
+  .file-types { font-size: 11px; color: #4b5563; margin-top: 5px; }
+
+  #preview-area { display: none; margin-top: 14px; border-radius: 8px; overflow: hidden; border: 1px solid #1f2235; }
+  #preview-area img { width: 100%; max-height: 200px; object-fit: contain; background: #1a1c2e; }
+  #pdf-indicator { display: none; background: #1a1c2e; border: 1px solid #1f2235; border-radius: 8px; padding: 14px; margin-top: 14px; font-size: 13px; color: #9ca3af; text-align: center; }
+
+  .btn {
+    display: block; width: 100%; margin-top: 14px; padding: 12px;
+    background: #6366f1; color: #fff; border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s, opacity 0.2s;
+  }
+  .btn:hover { background: #4f52d8; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #status { margin-top: 12px; font-size: 13px; color: #6b7280; text-align: center; min-height: 18px; }
+  .error-detail { font-size: 11px; color: #f87171; margin-top: 4px; text-align: center; word-break: break-all; }
+  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid #2d3148; border-top-color: #6366f1; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #results { display: none; margin-top: 22px; }
+
+  .section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.8px; color: #4b5563; margin: 18px 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: #1f2235; }
+  .section-label:first-child { margin-top: 0; }
+
+  .field { margin-bottom: 10px; }
+  .field-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.7px; color: #4b5563; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .required-dot { width: 5px; height: 5px; border-radius: 50%; background: #6366f1; display: inline-block; flex-shrink: 0; }
+  .auto-tag { font-size: 9px; background: #1a2035; color: #6366f1; border: 1px solid #2d3a6b; border-radius: 3px; padding: 1px 5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+
+  /* Input row: input + copy button side by side */
+  .input-row { display: flex; gap: 6px; align-items: stretch; }
+  .input-row input,
+  .input-row select,
+  .input-row textarea { flex: 1; min-width: 0; }
+
+  .copy-field-btn {
+    flex-shrink: 0;
+    background: #1f2235;
+    border: 1px solid #2d3148;
+    border-radius: 6px;
+    color: #6b7280;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 10px;
+    transition: background 0.15s, color 0.15s;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+  }
+  .copy-field-btn:hover { background: #252842; color: #a5b4fc; }
+  .copy-field-btn.copied { background: #1a2e1a; border-color: #166534; color: #4ade80; }
+
+  .field input, .field select, .field textarea {
+    width: 100%; background: #13151f; border: 1px solid #1f2235;
+    border-radius: 7px; padding: 10px 12px; color: #e8eaf0;
+    font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: #6366f1; }
+  .field input[readonly] { color: #6b7280; }
+  .field select option { background: #13151f; }
+  .field textarea { resize: vertical; min-height: 50px; }
+  .workday-ref { font-size: 10px; color: #374151; margin-top: 3px; font-style: italic; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .conditional-section { display: none; }
+  .conditional-section.visible { display: block; }
+
+  .btn-reset { margin-top: 16px; padding: 11px; background: #1f2235; color: #9ca3af; border: 1px solid #2d3148; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }
+  .btn-reset:hover { background: #252842; }
+
+  .history-section { margin-top: 28px; border-top: 1px solid #1f2235; padding-top: 18px; }
+  .history-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #4b5563; margin-bottom: 10px; }
+  .history-item { background: #13151f; border: 1px solid #1f2235; border-radius: 7px; padding: 9px 12px; margin-bottom: 7px; display: flex; justify-content: space-between; align-items: center; }
+  .history-merchant { color: #e8eaf0; font-size: 13px; font-weight: 600; }
+  .history-meta { color: #6b7280; font-size: 11px; margin-top: 2px; }
+  .history-amount { color: #4ade80; font-size: 14px; font-weight: 700; }
+  .clear-history { font-size: 11px; color: #4b5563; cursor: pointer; text-decoration: underline; text-align: right; display: block; margin-bottom: 8px; }
+  .clear-history:hover { color: #6b7280; }
+</style>
+</head>
+<body>
+
+<h1>⚡ Workday Expense Extractor</h1>
+<p class="subtitle">Gwen Ang · CS - Client Success · Singapore</p>
+
+<div class="upload-zone" id="drop-zone">
+  <input type="file" id="file-input" accept="image/*,.pdf" />
+  <div class="upload-icon">📎</div>
+  <div class="upload-label"><strong>Click to upload</strong> or drag & drop receipt</div>
+  <div class="file-types">JPG · PNG · WEBP · PDF</div>
+</div>
+
+<div id="preview-area"><img id="preview-img" src="" alt="Receipt preview" /></div>
+<div id="pdf-indicator">📄 PDF loaded — ready to extract</div>
+
+<button class="btn" id="extract-btn" disabled>Extract → Fill Workday Fields</button>
+<div id="status"></div>
+<div id="error-detail" class="error-detail"></div>
+
+<div id="results">
+
+  <div class="section-label">Core Fields</div>
+
+  <div class="two-col">
+    <div class="field">
+      <div class="field-label"><span class="required-dot"></span> Expense Date</div>
+      <div class="input-row">
+        <input type="text" id="f-date" placeholder="MM / DD / YYYY" />
+        <button class="copy-field-btn" onclick="copyField('f-date', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ Expense Date</div>
+    </div>
+    <div class="field">
+      <div class="field-label"><span class="required-dot"></span> Currency</div>
+      <div class="input-row">
+        <input type="text" id="f-currency" value="SGD" />
+        <button class="copy-field-btn" onclick="copyField('f-currency', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ Currency</div>
+    </div>
+  </div>
+
+  <div class="field">
+    <div class="field-label"><span class="required-dot"></span> Expense Item</div>
+    <div class="input-row">
+      <select id="f-expense-item">
+        <option value="">— Select —</option>
+        <option value="Meals & Entertainment">Meals &amp; Entertainment</option>
+        <option value="Local Transportation">Local Transportation</option>
+        <option value="Taxi / Ride-Hailing">Taxi / Ride-Hailing</option>
+        <option value="Public Transport">Public Transport</option>
+        <option value="Airfare">Airfare</option>
+        <option value="Hotel">Hotel</option>
+        <option value="Accommodation">Accommodation</option>
+        <option value="Office Supplies">Office Supplies</option>
+        <option value="Software / Subscriptions">Software / Subscriptions</option>
+        <option value="Training & Development">Training &amp; Development</option>
+        <option value="Client Entertainment">Client Entertainment</option>
+        <option value="Other">Other</option>
+      </select>
+      <button class="copy-field-btn" onclick="copyField('f-expense-item', this)" title="Copy">⎘</button>
+    </div>
+    <div class="workday-ref">→ Expense Item</div>
+  </div>
+
+  <div class="field">
+    <div class="field-label">Total Amount</div>
+    <div class="input-row">
+      <input type="text" id="f-amount" placeholder="0.00" />
+      <button class="copy-field-btn" onclick="copyField('f-amount', this)" title="Copy">⎘</button>
+    </div>
+    <div class="workday-ref">→ Total Amount</div>
+  </div>
+
+  <div class="field">
+    <div class="field-label"><span class="required-dot"></span> Memo</div>
+    <div class="input-row">
+      <textarea id="f-memo" placeholder="Business purpose or description…"></textarea>
+      <button class="copy-field-btn" onclick="copyField('f-memo', this)" title="Copy">⎘</button>
+    </div>
+    <div class="workday-ref">→ Memo</div>
+  </div>
+
+  <!-- ── AIRFARE ── -->
+  <div class="conditional-section" id="airfare-section">
+    <div class="section-label">✈️ Airfare — Item Details</div>
+
+    <div class="two-col">
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Airline</div>
+        <div class="input-row">
+          <input type="text" id="f-airline" placeholder="e.g. Singapore Airlines" />
+          <button class="copy-field-btn" onclick="copyField('f-airline', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Airline</div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Class of Service</div>
+        <div class="input-row">
+          <select id="f-class">
+            <option value="">— Select —</option>
+            <option value="Economy">Economy</option>
+            <option value="Premium Economy">Premium Economy</option>
+            <option value="Business">Business</option>
+            <option value="First">First</option>
+          </select>
+          <button class="copy-field-btn" onclick="copyField('f-class', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Class of Service</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Origination</div>
+        <div class="input-row">
+          <input type="text" id="f-origin" placeholder="e.g. Singapore" />
+          <button class="copy-field-btn" onclick="copyField('f-origin', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Origination</div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Destination</div>
+        <div class="input-row">
+          <input type="text" id="f-destination-air" placeholder="e.g. Bangkok" />
+          <button class="copy-field-btn" onclick="copyField('f-destination-air', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Destination</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Country</div>
+        <div class="input-row">
+          <input type="text" id="f-country" placeholder="e.g. Thailand" />
+          <button class="copy-field-btn" onclick="copyField('f-country', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Country</div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Number of Hours</div>
+        <div class="input-row">
+          <input type="text" id="f-hours" placeholder="e.g. 2.5" />
+          <button class="copy-field-btn" onclick="copyField('f-hours', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Number of Hours</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label"><span class="required-dot"></span> Merchant</div>
+      <div class="input-row">
+        <input type="text" id="f-merchant-air" placeholder="e.g. Scoot, Expedia" />
+        <button class="copy-field-btn" onclick="copyField('f-merchant-air', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ Merchant</div>
+    </div>
+
+    <div class="two-col">
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Date of Departure</div>
+        <div class="input-row">
+          <input type="text" id="f-depart-date" placeholder="MM / DD / YYYY" />
+          <button class="copy-field-btn" onclick="copyField('f-depart-date', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Date of Departure</div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Return Date</div>
+        <div class="input-row">
+          <input type="text" id="f-return-date" placeholder="MM / DD / YYYY" />
+          <button class="copy-field-btn" onclick="copyField('f-return-date', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Return Date</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── HOTEL ── -->
+  <div class="conditional-section" id="hotel-section">
+    <div class="section-label">🏨 Hotel — Item Details</div>
+
+    <div class="field">
+      <div class="field-label"><span class="required-dot"></span> Hotel Name</div>
+      <div class="input-row">
+        <input type="text" id="f-hotel-name" placeholder="e.g. Marriott Bangkok" />
+        <button class="copy-field-btn" onclick="copyField('f-hotel-name', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ Hotel</div>
+    </div>
+
+    <div class="two-col">
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Arrival Date</div>
+        <div class="input-row">
+          <input type="text" id="f-arrival-date" placeholder="MM / DD / YYYY" />
+          <button class="copy-field-btn" onclick="copyField('f-arrival-date', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Arrival Date</div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Departure Date</div>
+        <div class="input-row">
+          <input type="text" id="f-departure-date" placeholder="MM / DD / YYYY" />
+          <button class="copy-field-btn" onclick="copyField('f-departure-date', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Departure Date</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label"><span class="required-dot"></span> Destination</div>
+      <div class="input-row">
+        <input type="text" id="f-destination-hotel" placeholder="e.g. Bangkok, Thailand" />
+        <button class="copy-field-btn" onclick="copyField('f-destination-hotel', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ Destination</div>
+    </div>
+
+    <div class="two-col">
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Merchant</div>
+        <div class="input-row">
+          <input type="text" id="f-merchant-hotel" placeholder="e.g. Marriott" />
+          <button class="copy-field-btn" onclick="copyField('f-merchant-hotel', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Merchant</div>
+      </div>
+      <div class="field">
+        <div class="field-label"><span class="required-dot"></span> Merchant City</div>
+        <div class="input-row">
+          <input type="text" id="f-merchant-city" placeholder="e.g. Bangkok" />
+          <button class="copy-field-btn" onclick="copyField('f-merchant-city', this)" title="Copy">⎘</button>
+        </div>
+        <div class="workday-ref">→ Merchant City</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── AUTO-FILLED DEFAULTS ── -->
+  <div class="section-label">Auto-Filled Defaults</div>
+
+  <div class="field">
+    <div class="field-label">Cost Center <span class="auto-tag">auto</span></div>
+    <div class="input-row">
+      <input type="text" id="f-cost-center" value="231 - MM - CS - Client Success" readonly />
+      <button class="copy-field-btn" onclick="copyField('f-cost-center', this)" title="Copy">⎘</button>
+    </div>
+    <div class="workday-ref">→ *Cost Center</div>
+  </div>
+
+  <div class="two-col">
+    <div class="field">
+      <div class="field-label">Location <span class="auto-tag">auto</span></div>
+      <div class="input-row">
+        <input type="text" id="f-location" value="Singapore" readonly />
+        <button class="copy-field-btn" onclick="copyField('f-location', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ *Location</div>
+    </div>
+    <div class="field">
+      <div class="field-label">Sales Office <span class="auto-tag">auto</span></div>
+      <div class="input-row">
+        <input type="text" id="f-sales-office" value="Singapore" readonly />
+        <button class="copy-field-btn" onclick="copyField('f-sales-office', this)" title="Copy">⎘</button>
+      </div>
+      <div class="workday-ref">→ *Sales Office</div>
+    </div>
+  </div>
+
+  <button class="btn-reset" id="reset-btn">↩ New Receipt</button>
+</div>
+
+<div id="history-container" style="display:none">
+  <div class="history-section">
+    <div class="history-title">Recent Submissions</div>
+    <span class="clear-history" id="clear-history">Clear</span>
+    <div id="history-list"></div>
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('file-input');
+  const dropZone = document.getElementById('drop-zone');
+  const previewArea = document.getElementById('preview-area');
+  const previewImg = document.getElementById('preview-img');
+  const pdfIndicator = document.getElementById('pdf-indicator');
+  const extractBtn = document.getElementById('extract-btn');
+  const statusEl = document.getElementById('status');
+  const errorDetailEl = document.getElementById('error-detail');
+  const resultsEl = document.getElementById('results');
+  const expenseItemSel = document.getElementById('f-expense-item');
+
+  let currentBase64 = null, currentMediaType = null;
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem('wd_expense_history') || '[]'); } catch(e) {}
+  renderHistory();
+
+  expenseItemSel.addEventListener('change', () => {
+    const val = expenseItemSel.value;
+    document.getElementById('airfare-section').classList.toggle('visible', val === 'Airfare');
+    document.getElementById('hotel-section').classList.toggle('visible', val === 'Hotel');
+  });
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  function handleFile(file) {
+    const isPDF = file.type === 'application/pdf';
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      currentBase64 = dataUrl.split(',')[1];
+      currentMediaType = isPDF ? 'application/pdf' : file.type;
+      if (isPDF) { previewArea.style.display = 'none'; pdfIndicator.style.display = 'block'; }
+      else { pdfIndicator.style.display = 'none'; previewImg.src = dataUrl; previewArea.style.display = 'block'; }
+      extractBtn.disabled = false;
+      resultsEl.style.display = 'none';
+      statusEl.textContent = '';
+      errorDetailEl.textContent = '';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  extractBtn.addEventListener('click', async () => {
+    if (!currentBase64) return;
+    extractBtn.disabled = true;
+    statusEl.innerHTML = '<span class="spinner"></span>Reading receipt…';
+    errorDetailEl.textContent = '';
+
+    const isPDF = currentMediaType === 'application/pdf';
+    const contentPart = isPDF
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: currentBase64 } }
+      : { type: 'image', source: { type: 'base64', media_type: currentMediaType, data: currentBase64 } };
+
+    let res, data;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1200,
+          system: `You extract expense receipt data for Workday expense submission. Return ONLY valid JSON with no markdown, no backticks, no commentary before or after.
+
+Return exactly this structure:
+{
+  "expense_type": "standard | airfare | hotel",
+  "expense_date": "MM / DD / YYYY",
+  "expense_item": "Meals & Entertainment | Local Transportation | Taxi / Ride-Hailing | Public Transport | Airfare | Hotel | Accommodation | Office Supplies | Software / Subscriptions | Training & Development | Client Entertainment | Other",
+  "total_amount": "numeric only e.g. 24.50",
+  "currency": "3-letter ISO code default SGD",
+  "memo": "short business description max 80 chars",
+  "airfare": {
+    "airline": "string or null",
+    "class_of_service": "Economy | Premium Economy | Business | First or null",
+    "origination": "string or null",
+    "destination": "string or null",
+    "country": "string or null",
+    "number_of_hours": "number as string or null",
+    "merchant": "string or null",
+    "date_of_departure": "MM / DD / YYYY or null",
+    "return_date": "MM / DD / YYYY or null"
+  },
+  "hotel": {
+    "hotel_name": "string or null",
+    "arrival_date": "MM / DD / YYYY or null",
+    "departure_date": "MM / DD / YYYY or null",
+    "destination": "string or null",
+    "merchant": "string or null",
+    "merchant_city": "string or null"
+  }
+}`,
+          messages: [{
+            role: 'user',
+            content: [contentPart, { type: 'text', text: 'Extract all expense fields from this receipt. Return only the JSON object.' }]
+          }]
+        })
+      });
+    } catch (fetchErr) {
+      statusEl.textContent = '⚠ Network error — could not reach API.';
+      errorDetailEl.textContent = fetchErr.message;
+      resultsEl.style.display = 'block';
+      extractBtn.disabled = false;
+      return;
+    }
+
+    // Check HTTP status
+    if (!res.ok) {
+      let errBody = '';
+      try { errBody = await res.text(); } catch(e) {}
+      statusEl.textContent = `⚠ API error (HTTP ${res.status})`;
+      errorDetailEl.textContent = errBody.slice(0, 200);
+      resultsEl.style.display = 'block';
+      extractBtn.disabled = false;
+      return;
+    }
+
+    try {
+      data = await res.json();
+    } catch (jsonErr) {
+      statusEl.textContent = '⚠ Could not parse API response.';
+      errorDetailEl.textContent = jsonErr.message;
+      resultsEl.style.display = 'block';
+      extractBtn.disabled = false;
+      return;
+    }
+
+    // Check for API-level error in body
+    if (data.error) {
+      statusEl.textContent = '⚠ API returned an error.';
+      errorDetailEl.textContent = data.error.message || JSON.stringify(data.error);
+      resultsEl.style.display = 'block';
+      extractBtn.disabled = false;
+      return;
+    }
+
+    let p;
+    try {
+      const raw = data.content?.find(b => b.type === 'text')?.text || '';
+      if (!raw) throw new Error('Empty response from model');
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+      p = JSON.parse(cleaned);
+    } catch (parseErr) {
+      statusEl.textContent = '⚠ Could not parse extracted data.';
+      errorDetailEl.textContent = parseErr.message;
+      resultsEl.style.display = 'block';
+      extractBtn.disabled = false;
+      return;
+    }
+
+    // Populate core fields
+    if (p.expense_date) document.getElementById('f-date').value = p.expense_date;
+    if (p.total_amount) document.getElementById('f-amount').value = p.total_amount;
+    if (p.currency) document.getElementById('f-currency').value = p.currency;
+    if (p.memo) document.getElementById('f-memo').value = p.memo;
+
+    if (p.expense_item) {
+      const sel = expenseItemSel;
+      for (let opt of sel.options) {
+        if (opt.value === p.expense_item) { sel.value = p.expense_item; break; }
+      }
+    }
+
+    const isAir = p.expense_type === 'airfare';
+    const isHotel = p.expense_type === 'hotel';
+    document.getElementById('airfare-section').classList.toggle('visible', isAir);
+    document.getElementById('hotel-section').classList.toggle('visible', isHotel);
+
+    if (isAir && p.airfare) {
+      const a = p.airfare;
+      setVal('f-airline', a.airline);
+      if (a.class_of_service) document.getElementById('f-class').value = a.class_of_service;
+      setVal('f-origin', a.origination);
+      setVal('f-destination-air', a.destination);
+      setVal('f-country', a.country);
+      setVal('f-hours', a.number_of_hours);
+      setVal('f-merchant-air', a.merchant);
+      setVal('f-depart-date', a.date_of_departure);
+      setVal('f-return-date', a.return_date);
+    }
+
+    if (isHotel && p.hotel) {
+      const h = p.hotel;
+      setVal('f-hotel-name', h.hotel_name);
+      setVal('f-arrival-date', h.arrival_date);
+      setVal('f-departure-date', h.departure_date);
+      setVal('f-destination-hotel', h.destination);
+      setVal('f-merchant-hotel', h.merchant);
+      setVal('f-merchant-city', h.merchant_city);
+    }
+
+    resultsEl.style.display = 'block';
+    statusEl.textContent = '✓ Extracted — copy each field into Workday.';
+    extractBtn.disabled = false;
+
+    const entry = {
+      merchant: p.memo || 'Expense',
+      amount: (p.total_amount || '—') + ' ' + (p.currency || 'SGD'),
+      date: p.expense_date || '—',
+      type: p.expense_item || 'Other',
+      ts: Date.now()
+    };
+    history.unshift(entry);
+    if (history.length > 8) history = history.slice(0, 8);
+    try { localStorage.setItem('wd_expense_history', JSON.stringify(history)); } catch(e) {}
+    renderHistory();
+  });
+
+  function setVal(id, val) {
+    if (val != null && val !== '') document.getElementById(id).value = val;
+  }
+
+  function copyField(id, btn) {
+    const el = document.getElementById(id);
+    const text = el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : el.value;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.classList.add('copied');
+      btn.textContent = '✓';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '⎘'; }, 1800);
+    });
+  }
+
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    currentBase64 = null; currentMediaType = null;
+    fileInput.value = '';
+    previewArea.style.display = 'none'; pdfIndicator.style.display = 'none';
+    resultsEl.style.display = 'none'; statusEl.textContent = ''; errorDetailEl.textContent = '';
+    extractBtn.disabled = true;
+    ['f-date','f-amount','f-memo','f-airline','f-origin','f-destination-air','f-country',
+     'f-hours','f-merchant-air','f-depart-date','f-return-date','f-hotel-name',
+     'f-arrival-date','f-departure-date','f-destination-hotel','f-merchant-hotel','f-merchant-city']
+      .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    document.getElementById('f-currency').value = 'SGD';
+    document.getElementById('f-class').value = '';
+    expenseItemSel.value = '';
+    document.getElementById('airfare-section').classList.remove('visible');
+    document.getElementById('hotel-section').classList.remove('visible');
+  });
+
+  document.getElementById('clear-history').addEventListener('click', () => {
+    history = [];
+    try { localStorage.setItem('wd_expense_history', '[]'); } catch(e) {}
+    renderHistory();
+  });
+
+  function renderHistory() {
+    const container = document.getElementById('history-container');
+    const list = document.getElementById('history-list');
+    if (!history.length) { container.style.display = 'none'; return; }
+    container.style.display = 'block';
+    list.innerHTML = history.map(h => `
+      <div class="history-item">
+        <div>
+          <div class="history-merchant">${h.merchant}</div>
+          <div class="history-meta">${h.date} · <span style="color:#6366f1">${h.type}</span></div>
+        </div>
+        <div class="history-amount">${h.amount}</div>
+      </div>`).join('');
+  }
+</script>
+</body>
+</html>
